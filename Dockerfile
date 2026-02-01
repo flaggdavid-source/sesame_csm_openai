@@ -1,7 +1,7 @@
 # Multi-stage build for authenticated model downloads
 FROM python:3.10-slim AS model-downloader
 # Install huggingface-cli
-RUN pip install huggingface_hub
+RUN pip install "huggingface_hub[cli]"
 # Set working directory
 WORKDIR /model-downloader
 # Create directory for downloaded models
@@ -9,27 +9,20 @@ RUN mkdir -p /model-downloader/models/csm-1b
 RUN mkdir -p /model-downloader/models/dia-1.6b
 
 # This will run when building the image
-# You'll need to pass your Hugging Face token at build time
 ARG HF_TOKEN
-ENV HF_TOKEN=${HF_TOKEN}
 ARG TTS_ENGINE=csm
 
-# Login with token if provided
-RUN if [ -n "$HF_TOKEN" ]; then \
-    huggingface-cli login --token ${HF_TOKEN}; \
-    fi
-
-# Download CSM-1B model
+# Download CSM-1B model (pass token inline, no login step needed)
 RUN if [ -n "$HF_TOKEN" ] || [ "$TTS_ENGINE" = "csm" ]; then \
     echo "Downloading CSM-1B model..."; \
-    huggingface-cli download sesame/csm-1b ckpt.pt --local-dir /model-downloader/models/csm-1b; \
+    python -c "from huggingface_hub import hf_hub_download; hf_hub_download('sesame/csm-1b', 'ckpt.pt', local_dir='/model-downloader/models/csm-1b', token='${HF_TOKEN}' if '${HF_TOKEN}' else None)"; \
     else echo "Skipping CSM-1B model download"; fi
 
 # Download Dia-1.6B model
 RUN if [ -n "$HF_TOKEN" ] || [ "$TTS_ENGINE" = "dia" ]; then \
     echo "Downloading Dia-1.6B model..."; \
-    huggingface-cli download nari-labs/Dia-1.6B config.json --local-dir /model-downloader/models/dia-1.6b; \
-    huggingface-cli download nari-labs/Dia-1.6B dia-v0_1.pth --local-dir /model-downloader/models/dia-1.6b; \
+    python -c "from huggingface_hub import hf_hub_download; hf_hub_download('nari-labs/Dia-1.6B', 'config.json', local_dir='/model-downloader/models/dia-1.6b', token='${HF_TOKEN}' if '${HF_TOKEN}' else None)"; \
+    python -c "from huggingface_hub import hf_hub_download; hf_hub_download('nari-labs/Dia-1.6B', 'dia-v0_1.pth', local_dir='/model-downloader/models/dia-1.6b', token='${HF_TOKEN}' if '${HF_TOKEN}' else None)"; \
     else echo "Skipping Dia-1.6B model download"; fi
 
 # Now for the main application stage
@@ -74,13 +67,13 @@ RUN mkdir -p /app/static /app/models /app/models/csm-1b /app/models/dia-1.6b \
 # Copy static files
 COPY ./static /app/static
 
-# Install Python dependencies
+# Install Python dependencies (CUDA-enabled torch)
 RUN pip3 install --no-cache-dir --upgrade pip && \
-    pip3 install torch torchaudio numpy
+    pip3 install torch torchaudio numpy --index-url https://download.pytorch.org/whl/cu124
 
-# Install torchao from source
+# Install torchao from source (needs torch visible at build time)
 ENV CUDA_HOME=/usr/local/cuda
-RUN pip3 install git+https://github.com/pytorch/ao.git
+RUN pip3 install --no-build-isolation git+https://github.com/pytorch/ao.git
 
 # Install torchtune from source with specific branch for latest features
 RUN git clone https://github.com/pytorch/torchtune.git /tmp/torchtune && \
